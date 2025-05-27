@@ -78,7 +78,7 @@ class PathlibPath(click.Path):
         return Path(str(super().convert(value, param, ctx)))
 
 
-class EnumChoice(click.Choice[str]):
+class EnumChoice(click.Choice):
     """A Click choice argument created from an Enum
 
     choices are gathered from enum values, not their python keys, e.g.

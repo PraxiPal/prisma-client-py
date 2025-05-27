@@ -13,3 +13,5 @@ in `src/prisma/__init__.py` change __version__ to the version you want to build.
 - `export TWINE_USERNAME=azure`
 - `export TWINE_PASSWORD=<your PAT>`
 - `twine upload --repository-url https://pkgs.dev.azure.com/praxipal/_packaging/praxipal/pypi/ dist/*`
+
+if upload fails because it says version already exists, remove dist folder, all pycache filders, and the src/...egg folder

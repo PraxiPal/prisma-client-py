@@ -30,3 +30,40 @@ time.sleep({{ duration }})
 
         return actions.{{ name }}Actions[_PrismaModelT](get_client(), cls)
 {% endmacro %}
+
+
+
+{% macro render_type(type) %}
+{# It is important that we render subtypes first so that references can be resolved correctly #}
+{% for subtype in type.subtypes %}
+{{ render_type(subtype) }}
+{% endfor %}
+{% if type.kind == 'alias' %}
+{{ type.name }} = {{ type.to }}
+{% elif type.kind == 'union' %}
+{{ type.name }} = Union[
+    {% for variant in type.variants %}
+    '{{ variant.name }}',
+    {% endfor %}
+]
+{% elif type.kind == 'typeddict' %}
+{# We use the old syntax for defined TypedDicts so that fields that shadow keywords #}
+{# can be defined, e.g. 'not' #}
+{{ type.name }} = TypedDict(
+    '{{ type.name }}',
+    {
+        {% for field, subtype in type.fields.items() %}
+        '{{ field }}': {{ type_as_string(subtype) }},
+        {% endfor %}
+    },
+    total={{ type.total }}
+)
+{% elif type.kind == 'enum' %}
+class {{ type.name }}(StrEnum):
+    {% for name, value in type.members %}
+    {{ name }} = "{{ value }}"
+    {% endfor %}
+{% else %}
+{{ raise_err('Unhandled type kind: %s' % type.kind) }}
+{% endif %}
+{% endmacro %}

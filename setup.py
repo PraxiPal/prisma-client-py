@@ -26,6 +26,7 @@ with open('src/prisma/__init__.py', encoding='utf-8') as f:
 if not version:
     raise RuntimeError('version is not set')
 
+print(f'version: {version}')
 
 extras = {
     'node': requirements('node.txt'),
@@ -34,11 +35,11 @@ extras = {
 setup(
     name='prisma',
     version=version,
-    author='Robert Craigie',
-    author_email='robert@craigie.dev',
-    maintainer='Robert Craigie',
+    author='PraxiPal',
+    author_email='team@praxipal.com',
+    maintainer='PraxiPal',
     license='APACHE',
-    url='https://github.com/RobertCraigie/prisma-client-py',
+    url='https://github.com/PraxiPal/prisma-client-py',
     description='Prisma Client Python is an auto-generated and fully type-safe database client',
     install_requires=requirements('base.txt'),
     long_description=readme,

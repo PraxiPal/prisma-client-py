@@ -1,77 +1,1016 @@
 datasource db {
-  provider = "sqlite"
-  url      = "file:dev.db"
+  provider = "postgres"
+  url      = "postgresql://postgres:postgres@localhost:5432/postgres"
 }
 
-generator client {
-  // ensure all warnings that are reported during generation
-  // are raised as errors so we catch them early
-  provider                    = "python -W error -m prisma"
-  interface                   = "asyncio"
-  recursive_type_depth        = 5
-  partial_type_generator      = "tests/scripts/partial_type_generator.py"
-  enable_experimental_decimal = true
+generator python_client {
+  provider             = "python -W error -m prisma"
+  recursive_type_depth = -1
 }
 
-model Post {
-  id         String     @id @default(cuid())
-  created_at DateTime   @default(now())
-  updated_at DateTime   @updatedAt
-  title      String
-  published  Boolean
-  views      Int        @default(0)
-  desc       String?
-  author     User?      @relation(fields: [author_id], references: [id])
-  author_id  String?
-  categories Category[]
+generator js_client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "linux-arm64-openssl-1.1.x", "linux-arm64-openssl-3.0.x"]
 }
 
+model Practice {
+  id        String  @id @default(uuid())
+  name      String
+  shortName String? @map("short_name")
+  tasks     Task[]
+  calls     Call[]
+
+  // Metadata
+  stripeCustomerId String?   @map("stripe_customer_id")
+  // format <country id>-<state id> lower case e.g. de-bb, de-mv etc.
+  stateId          String    @map("state_id")
+  activeSince      DateTime? @map("active_since") @db.Timestamptz
+
+  patients                        Person[]
+  feedback                        Feedback[]
+  cachedAppointmentAvailabilities CachedAppointmentAvailability[]
+  patientAppointments             PatientAppointment[]
+  cachedAvailabilityRanges        CachedAvailabilityRanges[]
+
+  incrementalPmsSyncs IncrementalPmsSync[]
+
+  memberships PracticeMembership[]
+
+  pmsAppointmentTypes PmsAppointmentType[]
+  cachedOpeningHours  CachedOpeningHours[]
+  appointmentValidity AppointmentValidity[]
+  insuringPersons     MainInsuredPerson[]
+
+  notifications             Notification[]
+  notificationSubscriptions NotificationSubscription[]
+
+  freeLunaMinutesPerMonth     Int                           @default(0) @map("free_luna_minutes_per_month")
+  PracticeCustomizationUpdate PracticeCustomizationUpdate[]
+
+  @@index([name])
+  @@map("practice")
+}
+
+model Task {
+  id         String   @id @default(uuid())
+  practice   Practice @relation(fields: [practiceId], references: [id], onDelete: Cascade)
+  practiceId String   @map("practice_id")
+  call       Call?    @relation(fields: [callId], references: [id], onDelete: Cascade)
+  callId     String?  @map("call_id") // If null, this task might be manually created or merged
+
+  title        String
+  summary      String
+  markedDoneAt DateTime? @map("marked_done_at") @db.Timestamptz
+  priority     Priority?
+  person       Person?   @relation(fields: [personId], references: [id])
+  personId     String?   @map("person_id")
+
+  performedAtTimestamp DateTime @map("performed_at_timestamp") @db.Timestamptz
+
+  // Relation for merged tasks
+  // If this task is a merged task, this lists the original tasks it's composed of.
+  composedOf MergedTaskRelation[] @relation("MergedTask")
+  // If this task is an original task, this lists the merged tasks it's part of.
+  mergedInto MergedTaskRelation[] @relation("OriginalTask")
+
+  @@index([practiceId, performedAtTimestamp])
+  @@map("task")
+}
+
+model MergedTaskRelation {
+  mergedTaskId String @map("merged_task_id")
+  mergedTask   Task   @relation("MergedTask", fields: [mergedTaskId], references: [id], onDelete: Cascade)
+
+  originalTaskId String @map("original_task_id")
+  originalTask   Task   @relation("OriginalTask", fields: [originalTaskId], references: [id], onDelete: Cascade)
+
+  @@id([mergedTaskId, originalTaskId])
+  @@map("merged_task_relation")
+}
+
+model Call {
+  id String @id @map("id")
+
+  practice   Practice @relation(fields: [practiceId], references: [id], onDelete: Cascade)
+  practiceId String   @map("practice_id")
+
+  startTime            DateTime  @map("start_time") @db.Timestamptz
+  endTime              DateTime? @map("end_time") @db.Timestamptz
+  callerNumber         String?   @map("caller_number")
+  numberDialedByCaller String?   @map("number_dialed_by_caller")
+
+  conversationEvent ConversationEvent[]
+  recordings        CallRecording[]
+  softDeletedAt     DateTime?           @map("soft_deleted_at") @db.Timestamptz
+
+  stripeMeterRegistered Boolean @default(false) @map("stripe_meter_registered")
+
+  // DEBUG
+  deniedBecauseMaxNumParallelCallsReached Boolean? @map("denied_because_max_num_parallel_calls_reached")
+
+  // ACTIONS
+  appointmentActions       AppointmentAction[]
+  lunaAppointmentRevisions LunaAppointmentRevision[]
+  tasks                    Task[]
+  notifications            Notification[]
+
+  //ANALYSIS
+  analysisSummary        String?     @map("analysis_summary")
+  analysisIsReturnCall   Boolean?    @map("analysis_is_return_call")
+  analysisCallerType     CallerType? @map("analysis_caller_type")
+  analysisCallCategories String[]    @map("analysis_call_categories")
+
+  callerId String? @map("caller_id")
+  caller   Person? @relation("caller", fields: [callerId], references: [id], onDelete: Cascade)
+
+  // Quality control
+  feedbackState FeedbackState?                      @map("feedback_state")
+  evaluations   CallQualitativeEvaluationInstance[]
+  csat          Int?                                @map("csat")
+
+  markedAsReadByPracticeUser   User?   @relation("marked_as_read_by_practice_user", fields: [markedAsReadByPracticeUserId], references: [id])
+  markedAsReadByPracticeUserId String? @map("marked_as_read_by_practice_user_id")
+
+  markedAsReadByDeveloperUser   User?   @relation("marked_as_read_by_developer_user", fields: [markedAsReadByDeveloperUserId], references: [id])
+  markedAsReadByDeveloperUserId String? @map("marked_as_read_by_developer_user_id")
+
+  feedback Feedback[]
+
+  autoCallTags AutoCallTag[]
+
+  traceId String? @map("trace_id")
+
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  @@index([practiceId, startTime])
+  @@index([practiceId, feedbackState, startTime])
+  @@index([practiceId, markedAsReadByPracticeUserId, startTime])
+  @@index([practiceId, markedAsReadByDeveloperUserId, startTime])
+  @@index([updatedAt])
+  @@map("call")
+}
+
+model AutoCallTag {
+  id     String @id @default(uuid())
+  call   Call   @relation(fields: [callId], references: [id], onDelete: Cascade)
+  callId String @map("call_id")
+
+  createdAt     DateTime      @default(now()) @map("created_at") @db.Timestamptz
+  feedbackState FeedbackState @map("feedback_state")
+
+  // use to identify the version of the auto call tagging process in case we want to re-tag
+  version String @map("version")
+
+  // 0 - 1 confidence score
+  confidence Float? @map("confidence")
+
+  // internal metadata about the tag, can change per version
+  metadata Json @map("metadata")
+
+  @@map("auto_call_tag")
+}
+
+model Person {
+  id String @id @default(uuid())
+
+  pmsId String? @map("pms_id")
+
+  calls_where_this_is_caller Call[] @relation("caller")
+
+  callId String? @map("call_id")
+
+  firstname   String?
+  lastname    String?
+  birthday    Int?
+  birthmonth  Int?
+  birthyear   Int?
+  gender      Gender? @map("gender")
+  phone       String?
+  mobilePhone String? @map("mobile_phone")
+  email       String?
+  street      String?
+  zip         String?
+  city        String?
+  country     String?
+
+  insuranceType      InsuranceType?   @map("insurance_type")
+  insuranceStatus    InsuranceStatus? @map("insurance_status")
+  insuranceValidFrom DateTime?        @map("insurance_valid_from") @db.Timestamptz
+
+  insuredInInsuranceOfPerson   MainInsuredPerson? @relation("insured_in_insurance_of_person", fields: [insuredInInsuranceOfPersonId], references: [id])
+  insuredInInsuranceOfPersonId String?            @map("insured_in_insurance_of_person_id")
+
+  appointmentActions AppointmentAction[]
+
+  practice   Practice? @relation(fields: [practiceId], references: [id], onDelete: Cascade)
+  practiceId String?   @map("practice_id")
+
+  softDeletedAt           DateTime?                @map("soft_deleted_at") @db.Timestamptz
+  patientAppointments     PatientAppointment[]
+  pmsAppointmentRevisions PmsAppointmentRevision[]
+  task                    Task[]
+
+  @@index([practiceId, pmsId])
+  @@index([practiceId, birthyear, birthmonth, birthday])
+  @@index([practiceId, birthyear, birthday])
+  @@index([practiceId, birthmonth, birthday])
+  @@map("person")
+}
+
+model MainInsuredPerson {
+  id String @id @default(uuid())
+
+  practice   Practice? @relation(fields: [practiceId], references: [id], onDelete: Cascade)
+  practiceId String?   @map("practice_id")
+
+  coInsuredPersons Person[] @relation("insured_in_insurance_of_person")
+
+  firstname  String? @map("firstname")
+  lastname   String? @map("lastname")
+  birthday   Int?
+  birthmonth Int?
+  birthyear  Int?
+  street     String? @map("street")
+  zip        String? @map("zip")
+  city       String? @map("city")
+  country    String? @map("country")
+  phone      String? @map("phone")
+  mobile     String? @map("mobile")
+  email      String? @map("email")
+
+  softDeletedAt DateTime? @map("soft_deleted_at") @db.Timestamptz
+
+  @@map("main_insured_person")
+}
+
+enum InsuranceStatus {
+  FAMILY
+  RETIRED
+  INDIVIDUAL
+  STATUTORY
+  PRIVATE
+  OTHER
+}
+
+enum InsuranceType {
+  STATUTORY
+  PRIVATE
+}
+
+enum Gender {
+  MALE
+  FEMALE
+  DIVERSE
+  UNKNOWN
+}
+
+model CallQualitativeEvaluationInstance {
+  id String @id @default(uuid())
+
+  call   Call   @relation(fields: [callId], references: [id], onDelete: Cascade)
+  callId String @map("call_id")
+
+  evaluation   CallQualitativeEvaluation @relation(fields: [evaluationId], references: [id], onDelete: Cascade)
+  evaluationId String                    @map("evaluation_id")
+  updatedAt    DateTime                  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  @@unique([evaluationId, callId])
+  @@index([updatedAt])
+  @@map("call_qualitative_evaluation_instance")
+}
+
+model CallQualitativeEvaluation {
+  id   String                    @id @default(uuid())
+  name String                    @unique
+  type QualitativeEvaluationType
+
+  severity  Int?
+  instances CallQualitativeEvaluationInstance[]
+
+  @@map("call_qualitative_evaluation")
+}
+
+model CallRecording {
+  id     String @id @default(uuid())
+  call   Call   @relation(fields: [callId], references: [id], onDelete: Cascade)
+  callId String @map("call_id")
+
+  wasTranscribed    Boolean   @default(false) @map("was_transcribed")
+  startTime         DateTime? @map("start_time") @db.Timestamptz
+  endTime           DateTime? @map("end_time") @db.Timestamptz
+  blobProvider      String    @map("blob_provider")
+  blobItem          String    @map("blob_item")
+  deletionTimestamp DateTime? @map("deletion_timestamp") @db.Timestamptz
+  updatedAt         DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+  hidden            Boolean   @default(false) @map("hidden")
+
+  @@index([callId, endTime])
+  @@index([updatedAt])
+  @@index([wasTranscribed, deletionTimestamp])
+  @@map("call_recording")
+}
+
+// depreacted
+model AppointmentAction {
+  id     String @id @default(uuid())
+  call   Call   @relation(fields: [callId], references: [id], onDelete: Cascade)
+  callId String @map("call_id")
+
+  action               Action
+  // the timestamp when it was performed in the call, not when it was synced to the PMS!
+  performedAtTimestamp DateTime @map("performed_at_timestamp") @db.Timestamptz
+
+  appointmentId String? @map("appointment_id") // should be always set!
+
+  pmsAppointmentName   String  @map("pms_appointment_name")
+  pmsAppointmentId     String? @map("pms_appointment_id")
+  pmsAppointmentTypeId String  @map("pms_appointment_type_id")
+
+  patient   Person @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  patientId String @map("patient_id")
+
+  oldAppointmentStartTime      DateTime? @map("old_appointment_start_time") @db.Timestamptz
+  oldAppointmentStopTime       DateTime? @map("old_appointment_stop_time") @db.Timestamptz
+  oldPmsColumn                 String?   @map("old_pms_column")
+  oldAppointmentComment        String?   @map("old_appointment_comment")
+  oldAppointmentPractitionerId String?   @map("old_appointment_practitioner_id")
+
+  newAppointmentStartTime      DateTime? @map("new_appointment_start_time") @db.Timestamptz
+  newAppointmentStopTime       DateTime? @map("new_appointment_stop_time") @db.Timestamptz
+  newPmsColumn                 String?   @map("new_pms_column")
+  newAppointmentComment        String?   @map("new_appointment_comment")
+  newAppointmentPractitionerId String?   @map("new_appointment_practitioner_id")
+
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz
+
+  @@index([callId, performedAtTimestamp])
+  @@index([updatedAt])
+  @@map("appointment_action")
+}
+
+model VonageCall {
+  callUuid              String   @id @map("call_uuid")
+  conversationIds       String[] @map("conversation_ids")
+  conversationPartnerId String   @map("conversation_partner_id")
+  calledNumber          String   @map("called_number")
+  practiceId            String   @map("practice_id")
+
+  @@index([callUuid, conversationIds])
+  @@index([conversationIds])
+  @@map("vonage_call")
+}
+
+enum Priority {
+  HIGH
+  MEDIUM
+  LOW
+}
+
+enum CallerType {
+  PATIENT
+  PARENT_OF_PATIENT
+  REPRESENTATIVE_OF_PATIENT
+  COMPANY
+  INSURANCE
+  OTHER_PRACTICE
+  OTHER
+}
+
+enum SegmentType {
+  PRACTICE
+  CORE_AI
+  LEGAL_AI
+  WAITING_FOR_CONNECTION_TO_PRACTICE
+  UNSUCCESSFUL_FORWARD
+}
+
+enum Action {
+  BOOK
+  MOVE
+  CANCEL
+  UPDATE_COMMENT
+}
+
+enum Speaker {
+  PRACTICE
+  CALLER
+  CORE_AI
+  LEGAL_AI
+}
+
+enum WordOrigin {
+  VOICE
+  DTMF
+}
+
+enum FeedbackState {
+  POSITIVE
+  NEGATIVE
+  LATER
+  NO_CHANCE
+}
+
+enum QualitativeEvaluationType {
+  ERROR
+  UNPLEASANTRY
+}
+
+model RequestLog {
+  id        String   @id @default(uuid())
+  timestamp DateTime @default(now()) @db.Timestamptz
+  ipAddress String
+  action    String
+
+  method         String?
+  url            String?
+  statusCode     Int?
+  responseTimeMs Int?
+
+  @@index([timestamp])
+  @@index([ipAddress])
+  @@index([ipAddress, timestamp])
+  @@index([ipAddress, action, timestamp])
+  @@map("request_log")
+}
+
+// Appointment Mangement
+
+model CachedAvailabilityRanges {
+  id        String   @id @default(uuid())
+  fetchedAt DateTime @map("fetched_at") @db.Timestamptz
+
+  startTime DateTime @map("start_time") @db.Timestamptz
+  endTime   DateTime @map("end_time") @db.Timestamptz
+
+  appointmentTemplateId String    @map("appointment_template_id")
+  practice              Practice? @relation(fields: [practiceId], references: [id], onDelete: Cascade)
+  practiceId            String?   @map("practice_id")
+
+  @@index([practiceId, appointmentTemplateId, startTime, endTime, fetchedAt])
+  @@index([endTime])
+  @@map("cached_availability_ranges")
+}
+
+model CachedAppointmentAvailability {
+  id String @id @default(uuid())
+
+  fetchedAt DateTime @map("fetched_at") @db.Timestamptz
+
+  chairId   String   @map("chair_id")
+  startTime DateTime @map("start_time") @db.Timestamptz
+  endTime   DateTime @map("end_time") @db.Timestamptz
+
+  appointmentTemplateId String    @map("appointment_template_id")
+  practice              Practice? @relation(fields: [practiceId], references: [id], onDelete: Cascade)
+  practiceId            String?   @map("practice_id")
+
+  @@index([practiceId, appointmentTemplateId, startTime, endTime, fetchedAt])
+  @@index([practiceId, chairId, startTime, endTime])
+  @@index([endTime])
+  @@map("cached_appointment_availability")
+}
+
+enum AppointmentState {
+  ACTIVE
+  MISSED
+  COMPLETED
+  CANCELED
+  UNKNOWN
+}
+
+// luna-facing appointment state
+model PatientAppointment {
+  id String @id @default(uuid())
+
+  pmsAppointmentRevisions  PmsAppointmentRevision[]
+  lunaAppointmentRevisions LunaAppointmentRevision[]
+
+  startTime DateTime @map("start_time") @db.Timestamptz
+  endTime   DateTime @map("end_time") @db.Timestamptz
+
+  appointmentTypePmsId String @map("appointment_type_pms_id")
+
+  appointmentState AppointmentState @map("appointment_state")
+
+  practice   Practice @relation(fields: [practiceId], references: [id], onDelete: Cascade)
+  practiceId String   @map("practice_id")
+
+  person   Person? @relation(fields: [personId], references: [id])
+  personId String? @map("person_id")
+
+  columnId       String  @map("dentist_chair_id")
+  practitionerId String? @map("practitioner_id")
+
+  @@index([personId])
+  @@index([practiceId])
+  @@index([practiceId, startTime])
+  @@map("patient_appointment")
+}
+
+enum PmsAppointmentState {
+  ACTIVE
+  MISSED
+  COMPLETED
+  CANCELED
+  UNKNOWN
+}
+
+// each state from practice's PMS as a snapshot
+model PmsAppointmentRevision {
+  id String @id @default(uuid())
+
+  appointmentId String             @map("appointment_id")
+  appointment   PatientAppointment @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+
+  // the timestamp in the pms when the appointment was last modified
+  createdAt DateTime @map("created_at") @db.Timestamptz
+
+  fetchedAt DateTime @map("fetched_at") @db.Timestamptz
+  // === appointment related data ===
+
+  pmsAppointmentState PmsAppointmentState @map("pms_appointment_state")
+
+  pmsId String @map("pms_id")
+
+  pmsAppointmentType   PmsAppointmentType @relation(fields: [pmsAppointmentTypeId], references: [id], onDelete: Cascade)
+  pmsAppointmentTypeId String             @map("pms_appointment_type_id")
+
+  startTime DateTime @map("start_time") @db.Timestamptz
+  endTime   DateTime @map("end_time") @db.Timestamptz
+
+  pmsColumnId       String  @map("pms_column_id")
+  pmsPractitionerId String? @map("pms_practitioner_id")
+
+  person   Person? @relation(fields: [personId], references: [id])
+  personId String? @map("person_id")
+
+  comment String? @map("comment")
+
+  @@index([appointmentId])
+  @@index([pmsId])
+  @@map("pms_appointment_revision")
+}
+
+enum LunaAppointmentRevisionSyncState {
+  PENDING
+  SYNCED
+  SUPERSEDED
+  FINALLY_FAILED
+}
+
+// Each state after luna performed an action (may or may not be synced to the PMS yet)
+model LunaAppointmentRevision {
+  id String @id @default(uuid())
+
+  appointmentId String             @map("appointment_id")
+  appointment   PatientAppointment @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+
+  // the timestamp when luna performed the action
+  createdAt DateTime @map("created_at") @db.Timestamptz
+
+  callId String @map("call_id")
+  call   Call   @relation(fields: [callId], references: [id], onDelete: Cascade)
+
+  actionPerformed Action @map("action_performed")
+
+  // === PMS sync ===
+  syncState  LunaAppointmentRevisionSyncState @map("sync_state")
+  executions LunaAppointmentActionExecution[]
+  // === appointment related data ===
+
+  pmsAppointmentType   PmsAppointmentType @relation(fields: [pmsAppointmentTypeId], references: [id], onDelete: Cascade)
+  pmsAppointmentTypeId String             @map("pms_appointment_type_id")
+
+  startTime DateTime @map("start_time") @db.Timestamptz
+  endTime   DateTime @map("end_time") @db.Timestamptz
+
+  possibleColumnPractitionerCombinations AppointmentColumnPractitionerCombination[]
+
+  comment String? @map("comment")
+
+  @@index([syncState])
+  @@index([appointmentId, syncState, startTime])
+  @@map("luna_appointment_revision")
+}
+
+model AppointmentColumnPractitionerCombination {
+  id String @id @default(uuid())
+
+  pmsColumnId    String  @map("pms_column_id")
+  practitionerId String? @map("practitioner_id")
+
+  lunaAppointmentRevisionId String                  @map("luna_appointment_revision_id")
+  lunaAppointmentRevision   LunaAppointmentRevision @relation(fields: [lunaAppointmentRevisionId], references: [id], onDelete: Cascade)
+
+  @@index([lunaAppointmentRevisionId])
+  @@map("appointment_column_practitioner_combination")
+}
+
+enum ActionExecutor {
+  CORE
+  CRON
+}
+
+model LunaAppointmentActionExecution {
+  id String @id @default(uuid())
+
+  lunaAppointmentRevisionId String                  @map("luna_appointment_revision_id")
+  lunaAppointmentRevision   LunaAppointmentRevision @relation(fields: [lunaAppointmentRevisionId], references: [id], onDelete: Cascade)
+
+  executor   ActionExecutor @map("executor")
+  startedAt  DateTime       @map("started_at") @db.Timestamptz
+  finishedAt DateTime?      @map("finished_at") @db.Timestamptz
+  error      String?        @map("error")
+
+  @@index([lunaAppointmentRevisionId])
+  @@map("luna_appointment_action_execution")
+}
+
+// User management
 model User {
-  id         String   @id @default(cuid())
-  name       String
-  email      String?  @unique
-  created_at DateTime @default(now())
-  posts      Post[]
-  profile    Profile?
+  id             String               @id @default(uuid())
+  name           String?
+  email          String               @unique
+  emailVerified  DateTime?
+  image          String?
+  accounts       Account[]
+  feedback       Feedback[]           @relation("FeedbackCreatedByUser")
+  closedFeedback Feedback[]           @relation("FeedbackClosedByUser")
+  memberships    PracticeMembership[]
+
+  notificationSubscriptions NotificationSubscription[]
+
+  readCallsAsPracticeUser  Call[] @relation("marked_as_read_by_practice_user")
+  readCallsAsDeveloperUser Call[] @relation("marked_as_read_by_developer_user")
+
+  createdAt                   DateTime                      @default(now())
+  updatedAt                   DateTime                      @updatedAt
+  PracticeCustomizationUpdate PracticeCustomizationUpdate[]
 }
 
-model Category {
-  id    Int    @id @default(autoincrement())
-  posts Post[]
-  name  String
+model PracticeMembership {
+  userId     String
+  practiceId String
+  role       MembershipRole @default(MEMBER)
+
+  practice Practice @relation(fields: [practiceId], references: [id])
+  user     User     @relation(fields: [userId], references: [id])
+
+  @@id([userId, practiceId])
+  @@map("practice_membership")
 }
 
-/// We need this because of foo bar baz
-/// @Python(instance_name: "profile_custom_name")
-model Profile {
-  id      Int     @id @default(autoincrement())
-  user    User    @relation(fields: [user_id], references: [id])
-  user_id String  @unique
-  bio     String
-  city    String?
-  country String
-  views   Int     @default(0)
+enum MembershipRole {
+  MEMBER
+  ACCOUNT_MANAGER
+  ADMIN
+  DEVELOPER
 }
 
-// model that just exists for testing different schema types
-model Types {
-  id        Int      @id @default(autoincrement())
-  bool_     Boolean  @default(false)
-  string    String   @default("")
-  bytes     Bytes    @default("")
-  bigint    BigInt   @default(0)
-  integer   Int      @default(0)
-  float_    Float    @default(0)
-  datetime_ DateTime @default(now())
-  decimal_  Decimal  @default(1)
+model Account {
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
 
-  optional_int      Int?      @default(0)
-  optional_bool     Boolean?  @default(false)
-  optional_string   String?   @default("")
-  optional_bytes    Bytes?    @default("")
-  optional_bigint   BigInt?   @default(0)
-  optional_integer  Int?      @default(0)
-  optional_float    Float?    @default(0)
-  optional_datetime DateTime? @default(now())
-  optional_decimal  Decimal?  @default(1)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([provider, providerAccountId])
 }
+
+model PmsAppointmentType {
+  id             String    @id @default(uuid())
+  pmsId          String    @map("pms_id")
+  name           String    @map("name")
+  duration       Int       @map("duration")
+  color          String?   @map("color")
+  lastModified   DateTime? @map("last_modified") @db.Timestamptz
+  practitionerId String?   @map("practitioner_id")
+
+  softDelete DateTime? @map("soft_delete") @db.Timestamptz
+
+  practiceId String   @map("practice_id")
+  practice   Practice @relation(fields: [practiceId], references: [id], onDelete: Cascade)
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt  DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  // references
+  pmsAppointmentRevisions  PmsAppointmentRevision[]
+  lunaAppointmentRevisions LunaAppointmentRevision[]
+
+  @@unique([pmsId, practiceId])
+  @@map("pms_appointment_type")
+}
+
+model CachedOpeningHours {
+  id           String                @id @default(uuid())
+  name         String
+  color        String?               @map("color")
+  colorOutside String?               @map("color_outside")
+  timeparts    TimeRange[]
+  validities   AppointmentValidity[]
+
+  practiceId String   @map("practice_id")
+  practice   Practice @relation(fields: [practiceId], references: [id], onDelete: Cascade)
+
+  @@map("cached_opening_hours")
+}
+
+model TimeRange {
+  id String @id @default(uuid())
+
+  day WeekDay? @map("day")
+
+  morningStart        String? @map("morning_start")
+  morningEnd          String? @map("morning_end")
+  afternoonStart      String? @map("afternoon_start")
+  afternoonEnd        String? @map("afternoon_end")
+  breakfastBreakStart String? @map("breakfast_break_start")
+  breakfastBreakEnd   String? @map("breakfast_break_end")
+  afternoonBreakStart String? @map("afternoon_break_start")
+  afternoonBreakEnd   String? @map("afternoon_break_end")
+
+  CachedOpeningHours   CachedOpeningHours @relation(fields: [cachedOpeningHoursId], references: [id], onDelete: Cascade)
+  cachedOpeningHoursId String             @map("cached_opening_hours_id")
+
+  @@map("time_range")
+}
+
+model AppointmentValidity {
+  id Int @id @default(autoincrement())
+
+  cachedOpeningHoursId String @map("cached_opening_hours_id")
+
+  cachedOpeningHours CachedOpeningHours @relation(fields: [cachedOpeningHoursId], references: [id], onDelete: Cascade)
+
+  validFrom  DateTime?             @map("valid_from") @db.Date
+  validUntil DateTime?             @map("valid_until") @db.Date
+  range      AppointmentWeekRange? @map("range")
+
+  validColumns String[]  @map("valid_columns")
+  Practice     Practice? @relation(fields: [practiceId], references: [id])
+  practiceId   String?
+
+  @@map("appointment_validity")
+}
+
+enum AppointmentWeekRange {
+  ALL
+  EVEN
+  ODD
+}
+
+enum WeekDay {
+  MONDAY
+  TUESDAY
+  WEDNESDAY
+  THURSDAY
+  FRIDAY
+  SATURDAY
+  SUNDAY
+}
+
+model VerificationToken {
+  identifier String
+  token      String
+  expires    DateTime
+
+  @@id([identifier, token])
+}
+
+// === notifications ===
+
+model Notification {
+  id        String           @id @default(uuid())
+  typeId    String           @map("type_id")
+  type      NotificationType @relation(fields: [typeId], references: [id], onDelete: Cascade)
+  title     String           @map("title")
+  body      String           @map("body")
+  createdAt DateTime         @default(now()) @db.Timestamptz
+
+  callId String? @map("call_id")
+  call   Call?   @relation(fields: [callId], references: [id], onDelete: Cascade)
+
+  practiceId String   @map("practice_id")
+  practice   Practice @relation(fields: [practiceId], references: [id], onDelete: Cascade)
+
+  deliveryLogs NotificationDeliveryLog[]
+
+  @@map("notification")
+}
+
+model NotificationType {
+  id   String @id @default(uuid())
+  name String @map("name")
+
+  notifications Notification[]
+  subscriptions NotificationSubscription[]
+
+  @@map("notification_type")
+}
+
+// extend for SMS, Push etc.
+enum NotificationChannel {
+  EMAIL
+}
+
+model NotificationSubscription {
+  id String @id @default(uuid())
+
+  typeId String           @map("type_id")
+  type   NotificationType @relation(fields: [typeId], references: [id], onDelete: Cascade)
+
+  userId String @map("user_id")
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  practiceId String   @map("practice_id")
+  practice   Practice @relation(fields: [practiceId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now()) @db.Timestamptz
+
+  channel NotificationChannel @map("channel")
+
+  deliveryLogs NotificationDeliveryLog[]
+
+  @@unique([userId, typeId, channel, practiceId])
+  @@map("notification_subscription")
+}
+
+enum NotificationDeliveryStatus {
+  SENT
+  FAILED
+}
+
+model NotificationDeliveryLog {
+  id String @id @default(uuid())
+
+  notificationId String       @map("notification_id")
+  notification   Notification @relation(fields: [notificationId], references: [id], onDelete: Cascade)
+
+  // if someone disabled the subscription, we still want to keep the delivery log
+  subscriptionId String?                   @map("subscription_id")
+  subscription   NotificationSubscription? @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime  @default(now()) @db.Timestamptz
+  sentAt    DateTime? @map("sent_at") @db.Timestamptz
+  error     String?   @map("error")
+
+  status NotificationDeliveryStatus @map("status")
+
+  @@map("notification_delivery_log")
+}
+
+model Feedback {
+  id String @id @default(uuid())
+
+  userId String @map("user_id")
+  user   User   @relation("FeedbackCreatedByUser", fields: [userId], references: [id], onDelete: Cascade)
+
+  practiceId String   @map("practice_id")
+  practice   Practice @relation(fields: [practiceId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  closedByUserId String? @map("closed_by_user_id")
+  closedByUser   User?   @relation("FeedbackClosedByUser", fields: [closedByUserId], references: [id], onDelete: SetNull)
+
+  callId String? @map("call_id")
+  call   Call?   @relation(fields: [callId], references: [id], onDelete: SetNull)
+
+  feedback String @map("feedback")
+
+  @@map("feedback")
+}
+
+enum PmsSyncType {
+  APPOINTMENT_TYPES // -> no key
+  PATIENT // -> no key
+  APPOINTMENT // -> key = <start of fetched bucket as yyyy-mm-dd>_<end of fetched bucket as yyyy-mm-dd>
+  AVAILABILITY // -> key = <start of fetched bucket as yyyy-mm-dd>_<end of fetched bucket as yyyy-mm-dd>
+}
+
+model IncrementalPmsSync {
+  id String @id @default(uuid())
+
+  jobId String @map("job_id")
+
+  practiceId String   @map("practice_id")
+  practice   Practice @relation(fields: [practiceId], references: [id], onDelete: Cascade)
+
+  startedAt    DateTime  @map("started_at") @db.Timestamptz
+  finishedAt   DateTime? @map("finished_at") @db.Timestamptz
+  isSuccess    Boolean   @map("is_success")
+  errorMessage String?   @map("error_message")
+
+  syncType PmsSyncType
+
+  // key for the sync if multiple syncs per sync type are possible. example: appointments are chunked by range, availabilitites by range + appointment type id
+  key String?
+
+  // hash of the input for the sync. used to detect changes, for example for appointment types to detect when we have to refetch everything
+  inputHash String? @map("input_hash")
+
+  @@index([practiceId, syncType])
+  @@map("incremental_pms_sync")
+}
+
+model FullStripeMeterUpdate {
+  id String @id @default(uuid())
+
+  // pod name if run in kubernetes, else host name + some id
+  jobId String @map("job_id")
+
+  practiceId       String    @map("practice_id")
+  startedAt        DateTime  @map("started_at") @db.Timestamptz
+  finishedAt       DateTime? @map("finished_at") @db.Timestamptz
+  error            String?   @map("error")
+  lunaUsageMinutes Float?    @map("luna_usage_minutes")
+
+  // list of the raw pms appointment type ids that were downloaded
+  fetchedCalls Int @default(0) @map("fetched_calls")
+
+  @@map("full_stripe_meter_update")
+}
+
+model ConversationEvent {
+  sequenceId Int @id @default(autoincrement()) @map("sequence_id")
+
+  startTimestamp DateTime @map("start_timestamp") @db.Timestamptz
+  endTimestamp   DateTime @map("end_timestamp") @db.Timestamptz
+  eventType      String   @map("event_type")
+
+  conversationId String @map("conversation_id")
+  conversation   Call   @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  data              Json      @map("data")
+  expirationOfEvent DateTime? @map("expiration_of_event") @db.Timestamptz
+
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
+
+  @@index([conversationId, expirationOfEvent])
+  @@index([expirationOfEvent])
+  @@index([eventType])
+  @@map("conversation_event")
+}
+
+model TelnyxEvent {
+  id        String   @id @default(uuid())
+  eventType String   @map("event_type")
+  eventData Json     @map("event_data")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+
+  @@map("telnyx_event")
+}
+
+model PartialPmsAppointmentDownload {
+  // Used for storing the timestamp when we last fetched appointment changes from the PMS (GetLatestAppointments in ivoris)
+
+  practiceId String   @id @map("practice_id")
+  startedAt  DateTime @map("started_at") @db.Timestamptz
+
+  @@map("partial_pms_appointment_download")
+}
+
+model PracticeCustomizationUpdate {
+  id              Int      @id @default(autoincrement())
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz
+  createdByUserAt DateTime @default(now()) @map("created_by_user_at") @db.Timestamptz
+  createdByUserId String   @map("created_by_user_id")
+  createdByUser   User     @relation(fields: [createdByUserId], references: [id], onDelete: NoAction) // Don't delete customizations when a user is deleted. Will SQL forbid the user from being deleted?
+
+  practiceId String   @map("practice_id")
+  practice   Practice @relation(fields: [practiceId], references: [id], onDelete: Cascade)
+
+  customizationType                  String                      @map("customization_type")
+  customizationTypeVersion           String                      @map("customization_type_version")
+  customizationTypeSchemaInformation PracticeCustomizationSchema @relation(fields: [customizationType, customizationTypeVersion], references: [customizationType, customizationTypeVersion], onDelete: Cascade)
+
+  customizationData                      Json                         @map("customization_data")
+  createdByMigrationFromPreviousUpdateId Int?                         @unique
+  createdByMigrationFromPreviousUpdate   PracticeCustomizationUpdate? @relation("MigrationRelation", fields: [createdByMigrationFromPreviousUpdateId], references: [id], onDelete: Cascade)
+  migrationToNewUpdate                   PracticeCustomizationUpdate? @relation("MigrationRelation")
+
+  @@map("practice_customization_update")
+}
+
+model PracticeCustomizationSchema {
+  customizationType           String                        @map("type")
+  customizationTypeVersion    String                        @map("version")
+  json_schema                 Json                          @map("json_schema")
+  createdAt                   DateTime                      @default(now()) @map("created_at") @db.Timestamptz
+  PracticeCustomizationUpdate PracticeCustomizationUpdate[]
+
+  @@id([customizationType, customizationTypeVersion])
+  @@map("practice_customization_schema")
+}
+

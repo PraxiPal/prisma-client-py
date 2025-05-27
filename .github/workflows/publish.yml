@@ -1,9 +1,9 @@
-name: Publish to PyPi
+name: Publish to Azure Artifacts
 on:
   workflow_dispatch:
 
 jobs:
-  publish-pypi:
+  build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -11,7 +11,7 @@ jobs:
       - name: Set up Python 3.9
         uses: actions/setup-python@v5
         with:
-          python-version: 3.9
+          python-version: 3.12
 
       - name: Install dependencies
         run: |
@@ -20,7 +20,24 @@ jobs:
       - name: Build Package
         run: |
           python setup.py sdist bdist_wheel
+      - name: Upload wheels as artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheels
+          path: dist/*
 
-      - name: Upload to PyPi
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download wheels
+        uses: actions/download-artifact@v4
+        with:
+          name: wheels
+          path: dist
+      - name: Publish to Azure Artifacts
+        env:
+          TWINE_USERNAME: azure
+          TWINE_PASSWORD: ${{ secrets.AZURE_DEVOPS_PAT }}
         run: |
-          twine upload -u __token__ -p ${{ secrets.PYPI_TOKEN }} dist/*
+          twine upload --repository-url ${{ vars.AZURE_ARTIFACTS_PYPI_BASE_URL }}/upload/ dist/*

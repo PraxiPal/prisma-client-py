@@ -26,7 +26,7 @@ from .._types import Literal
 log: logging.Logger = logging.getLogger(__name__)
 
 
-class PrismaCLI(click.MultiCommand):
+class PrismaCLI(click.Group):
     base_package: str = 'prisma.cli.commands'
     folder: Path = Path(__file__).parent / 'commands'
 
@@ -78,7 +78,7 @@ class PathlibPath(click.Path):
         return Path(str(super().convert(value, param, ctx)))
 
 
-class EnumChoice(click.Choice):
+class EnumChoice(click.Choice[str]):
     """A Click choice argument created from an Enum
 
     choices are gathered from enum values, not their python keys, e.g.

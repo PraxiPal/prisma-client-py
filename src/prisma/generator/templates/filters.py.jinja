@@ -1,0 +1,333 @@
+{% include '_header.py.jinja' %}
+{% from '_utils.py.jinja' import recursive_types, active_provider with context %}
+# -- template filters.py.jinja --
+
+from . import _types
+
+{% if not recursive_types %}
+raise ValueError("Need to use this client with recursive types (type depth -1)")
+{% endif %}
+
+
+SortMode = _types.SortMode
+SortOrder = _types.SortOrder
+
+MetricsFormat = _types.MetricsFormat
+
+DatasourceOverride = _types.DatasourceOverride
+HttpConfig = _types.HttpConfig
+
+
+# types that can be serialized to json by our query builder
+Serializable = Union[
+    None,
+    bool,
+    float,
+    int,
+    str,
+    datetime.datetime,
+    List['Serializable'],
+    Dict[None, 'Serializable'],
+    Dict[bool, 'Serializable'],
+    Dict[float, 'Serializable'],
+    Dict[int, 'Serializable'],
+    Dict[str, 'Serializable'],
+]
+
+
+StringFilter = TypedDict(
+    'StringFilter',
+    {
+        'equals': str,
+        'not_in': List[str],
+        'lt': str,
+        'lte': str,
+        'gt': str,
+        'gte': str,
+        'contains': str,
+        'startswith': str,
+        'endswith': str,
+        'in': List[str],
+        'not': Union[str, 'StringFilter'],
+        'mode': SortMode,
+        'search': str,
+    },
+    total=False,
+)
+
+
+class StringWithAggregatesFilter(StringFilter, total=False):
+    _max: 'StringFilter'
+    _min: 'StringFilter'
+    _sum: 'StringFilter'
+    _avg: 'StringFilter'
+    _count: 'IntFilter'
+
+
+DateTimeFilter = TypedDict(
+    'DateTimeFilter',
+    {
+        'equals': datetime.datetime,
+        'not_in': List[datetime.datetime],
+        'lt': datetime.datetime,
+        'lte': datetime.datetime,
+        'gt': datetime.datetime,
+        'gte': datetime.datetime,
+        'in': List[datetime.datetime],
+        'not': Union[datetime.datetime, 'DateTimeFilter'],
+    },
+    total=False,
+)
+
+
+
+class DateTimeWithAggregatesFilter(DateTimeFilter, total=False):
+    _max: 'DateTimeFilter'
+    _min: 'DateTimeFilter'
+    _sum: 'DateTimeFilter'
+    _avg: 'DateTimeFilter'
+    _count: 'IntFilter'
+
+BooleanFilter = TypedDict(
+    'BooleanFilter',
+    {
+        'equals': bool,
+        'not': Union[bool, 'DateTimeFilter'],
+    },
+    total=False,
+)
+
+
+class BooleanWithAggregatesFilter(BooleanFilter, total=False):
+    _max: 'BooleanFilter'
+    _min: 'BooleanFilter'
+    _sum: 'BooleanFilter'
+    _avg: 'BooleanFilter'
+    _count: 'IntFilter'
+
+
+IntFilter = TypedDict(
+    'IntFilter',
+    {
+        'equals': int,
+        'not_in': List[int],
+        'lt': int,
+        'lte': int,
+        'gt': int,
+        'gte': int,
+        'in': List[int],
+        'not': Union[int, 'IntFilter'],
+    },
+    total=False,
+)
+
+
+class IntWithAggregatesFilter(IntFilter, total=False):
+    _max: 'IntFilter'
+    _min: 'IntFilter'
+    _sum: 'IntFilter'
+    _avg: 'IntFilter'
+    _count: 'IntFilter'
+
+
+BigIntFilter = IntFilter
+BigIntWithAggregatesFilter = IntWithAggregatesFilter
+
+FloatFilter = TypedDict(
+    'FloatFilter',
+    {
+        'equals': float,
+        'not_in': List[float],
+        'lt': float,
+        'lte': float,
+        'gt': float,
+        'gte': float,
+        'in': List[float],
+        'not': Union[float, 'FloatFilter'],
+    },
+    total=False,
+)
+
+class FloatWithAggregatesFilter(FloatFilter, total=False):
+    _max: 'FloatFilter'
+    _min: 'FloatFilter'
+    _sum: 'FloatFilter'
+    _avg: 'FloatFilter'
+    _count: 'IntFilter'
+
+
+BytesFilter = TypedDict(
+    'BytesFilter',
+    {
+        'equals': 'fields.Base64',
+        'in': List['fields.Base64'],
+        'not_in': List['fields.Base64'],
+        'not': Union['fields.Base64', 'BytesFilter'],
+    },
+    total=False,
+)
+
+
+
+class BytesWithAggregatesFilter(BytesFilter, total=False):
+    _max: 'BytesFilter'
+    _min: 'BytesFilter'
+    _sum: 'BytesFilter'
+    _avg: 'BytesFilter'
+    _count: 'IntFilter'
+
+
+# TODO: preview feature for improving JSON filtering
+JsonFilter = TypedDict(
+    'JsonFilter',
+    {
+        'equals': 'fields.Json',
+        'not': 'fields.Json',
+    },
+    total=False,
+)
+
+
+class JsonWithAggregatesFilter(JsonFilter, total=False):
+    _max: 'JsonFilter'
+    _min: 'JsonFilter'
+    _sum: 'JsonFilter'
+    _avg: 'JsonFilter'
+    _count: 'IntFilter'
+
+
+DecimalFilter = TypedDict(
+    'DecimalFilter',
+    {
+        'equals': decimal.Decimal,
+        'not_in': List[decimal.Decimal],
+        'lt': decimal.Decimal,
+        'lte': decimal.Decimal,
+        'gt': decimal.Decimal,
+        'gte': decimal.Decimal,
+        'in': List[decimal.Decimal],
+        'not': Union[decimal.Decimal, 'DecimalFilter'],
+    },
+    total=False,
+)
+
+
+
+
+class DecimalWithAggregatesFilter(DecimalFilter, total=False):
+    _max: 'DecimalFilter'
+    _min: 'DecimalFilter'
+    _sum: 'DecimalFilter'
+    _avg: 'DecimalFilter'
+    _count: 'IntFilter'
+
+
+class _FloatSetInput(TypedDict):
+    set: float
+
+
+class _FloatDivideInput(TypedDict):
+    divide: float
+
+
+class _FloatMultiplyInput(TypedDict):
+    multiply: float
+
+
+class _FloatIncrementInput(TypedDict):
+    increment: float
+
+
+class _FloatDecrementInput(TypedDict):
+    decrement: float
+
+
+class _IntSetInput(TypedDict):
+    set: int
+
+
+class _IntDivideInput(TypedDict):
+    divide: int
+
+
+class _IntMultiplyInput(TypedDict):
+    multiply: int
+
+
+class _IntIncrementInput(TypedDict):
+    increment: int
+
+
+class _IntDecrementInput(TypedDict):
+    decrement: int
+
+
+AtomicFloatInput = Union[
+    _FloatSetInput,
+    _FloatDivideInput,
+    _FloatMultiplyInput,
+    _FloatIncrementInput,
+    _FloatDecrementInput,
+]
+AtomicIntInput = Union[
+    _IntSetInput,
+    _IntDivideInput,
+    _IntMultiplyInput,
+    _IntIncrementInput,
+    _IntDecrementInput,
+]
+AtomicBigIntInput = AtomicIntInput
+
+
+
+{% for type, python_type in get_list_types() %}
+class _{{ type }}ListFilterEqualsInput(TypedDict):
+    equals: Optional[List[{{ python_type }}]]
+
+
+class _{{ type }}ListFilterHasInput(TypedDict):
+    has: {{ python_type }}
+
+
+class _{{ type }}ListFilterHasEveryInput(TypedDict):
+    has_every: List[{{ python_type }}]
+
+
+class _{{ type }}ListFilterHasSomeInput(TypedDict):
+    has_some: List[{{ python_type }}]
+
+
+class _{{ type }}ListFilterIsEmptyInput(TypedDict):
+    is_empty: bool
+
+
+{{ type }}ListFilter = Union[
+    _{{ type }}ListFilterHasInput,
+    _{{ type }}ListFilterEqualsInput,
+    _{{ type }}ListFilterHasSomeInput,
+    _{{ type }}ListFilterIsEmptyInput,
+    _{{ type }}ListFilterHasEveryInput,
+]
+
+
+class _{{ type }}ListUpdateSet(TypedDict):
+    set: List[{{ python_type }}]
+
+
+{% if active_provider != 'cockroachdb' %}
+class _{{ type }}ListUpdatePush(TypedDict):
+    push: List[{{ python_type }}]
+{% endif %}
+
+
+{{ type }}ListUpdate = Union[
+    List[{{ python_type }}],
+    _{{ type }}ListUpdateSet,
+    {% if active_provider != 'cockroachdb' %}
+    _{{ type }}ListUpdatePush,
+    {% endif %}
+]
+
+{% endfor %}
+
+from . import enums, fields

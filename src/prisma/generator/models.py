@@ -1056,7 +1056,7 @@ class Field(BaseModel):
 
         if self.is_list:
             self.check_supported_scalar_list_type()
-            return f"'types.{self.type}ListUpdate'"
+            return f"'{self.type}ListUpdate'"
 
         if self.is_atomic:
             return f'Union[Atomic{self.type}Input, {self.python_type}]'
